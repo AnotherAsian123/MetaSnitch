@@ -70,8 +70,13 @@ export function Lightbox({
 
   return (
     <div className="fixed inset-0 z-50 flex animate-fade-in flex-col bg-black/90 backdrop-blur-sm md:flex-row">
-      {/* Image stage */}
-      <div className="relative flex min-h-0 flex-1 items-center justify-center p-4">
+      {/* Image stage — clicking the empty space around the image closes it */}
+      <div
+        className="relative flex min-h-0 flex-1 items-center justify-center p-4"
+        onClick={(e) => {
+          if (e.target === e.currentTarget) onClose();
+        }}
+      >
         <button
           onClick={onClose}
           className="absolute right-4 top-4 z-10 rounded-full border border-charcoal/50 bg-black/40 p-2 text-snow transition-colors hover:border-ash"

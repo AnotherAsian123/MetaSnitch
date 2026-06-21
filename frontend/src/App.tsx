@@ -3,7 +3,7 @@ import { api } from "./api";
 import { BrowseModal } from "./components/BrowseModal";
 import { CompareView } from "./components/CompareView";
 import { Gallery } from "./components/Gallery";
-import { FolderIcon, UploadIcon } from "./components/icons";
+import { CloseIcon, FolderIcon, UploadIcon } from "./components/icons";
 import { Lightbox } from "./components/Lightbox";
 import { LoadingOverlay } from "./components/Spinner";
 import { SeedView } from "./components/SeedView";
@@ -11,7 +11,7 @@ import { TopBar } from "./components/TopBar";
 import { getMeta } from "./lib/metaCache";
 import { useToast } from "./lib/toast";
 import { useDebounce } from "./lib/useDebounce";
-import type { GalleryItem, Metadata, SeedCluster, SortKey } from "./types";
+import type { GalleryItem, HistoryEntry, Metadata, SortKey } from "./types";
 
 let localCounter = 0;
 
@@ -41,15 +41,26 @@ export default function App() {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [browseOpen, setBrowseOpen] = useState(false);
-  const [compareEntries, setCompareEntries] = useState<Array<{ label: string; md: Metadata }> | null>(null);
-  const [seedClusters, setSeedClusters] = useState<SeedCluster[] | null>(null);
+  const [compareEntries, setCompareEntries] = useState<
+    Array<{ label: string; md: Metadata; src: string }> | null
+  >(null);
+  const [seedPath, setSeedPath] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [uploadsDir, setUploadsDir] = useState<string | null>(null);
   const [pendingOpenPath, setPendingOpenPath] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
 
   const serverMode = serverFolder != null;
   const localUrls = useRef<string[]>([]);
+  const lastRecorded = useRef<string | null>(null);
+
+  const loadHistory = useCallback(() => {
+    api.history().then(setHistory).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const keyFor = useCallback((item: GalleryItem) => item.id, []);
   const loadMeta = useCallback(
@@ -81,6 +92,11 @@ export default function App() {
               }));
           }
           if (!cancelled) setItems(next);
+          // Record the folder as analysed (once per folder) so it persists in history.
+          if (!cancelled && lastRecorded.current !== serverFolder) {
+            lastRecorded.current = serverFolder;
+            api.addHistory(serverFolder, next.length).then(loadHistory).catch(() => undefined);
+          }
         } catch (e) {
           if (!cancelled) toast((e as Error).message);
         } finally {
@@ -124,6 +140,7 @@ export default function App() {
 
   const openServerFolder = (path: string) => {
     setLocalItems(null);
+    lastRecorded.current = null; // re-record so reopening bumps recency
     setServerFolder(path);
     setSelected(new Set());
     setSearch("");
@@ -197,7 +214,11 @@ export default function App() {
     if (chosen.length < 2) return;
     try {
       const entries = await Promise.all(
-        chosen.map(async (it) => ({ label: it.name, md: await getMeta(keyFor(it), () => loadMeta(it)) })),
+        chosen.map(async (it) => ({
+          label: it.name,
+          md: await getMeta(keyFor(it), () => loadMeta(it)),
+          src: it.kind === "server" ? api.imageUrl(it.path) : it.url,
+        })),
       );
       setCompareEntries(entries);
     } catch (e) {
@@ -205,16 +226,12 @@ export default function App() {
     }
   };
 
-  const openSeeds = async () => {
-    if (!serverFolder) return;
-    setLoading(true);
-    try {
-      setSeedClusters(await api.seeds(serverFolder));
-    } catch (e) {
-      toast((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
+  const openSeeds = () => {
+    if (serverFolder) setSeedPath(serverFolder);
+  };
+
+  const removeFromHistory = (p: string) => {
+    api.removeHistory(p).then(setHistory).catch(() => undefined);
   };
 
   const doExport = (fmt: "csv" | "json") => {
@@ -227,7 +244,7 @@ export default function App() {
   const openPath = (path: string) => {
     const idx = items.findIndex((i) => i.kind === "server" && i.path === path);
     if (idx >= 0) {
-      setSeedClusters(null);
+      setSeedPath(null);
       setLightboxIndex(idx);
     }
   };
@@ -268,7 +285,13 @@ export default function App() {
         {loading && items.length === 0 ? (
           <LoadingOverlay label={serverMode ? "Reading folder…" : "Loading images…"} />
         ) : !hasSource ? (
-          <Hero onOpenServer={() => setBrowseOpen(true)} onAddImages={addUploads} />
+          <Hero
+            onOpenServer={() => setBrowseOpen(true)}
+            onAddImages={addUploads}
+            history={history}
+            onOpenRecent={openServerFolder}
+            onRemoveRecent={removeFromHistory}
+          />
         ) : items.length === 0 ? (
           <div className="flex h-full items-center justify-center text-center text-ash">
             <p>No images found here.</p>
@@ -294,7 +317,13 @@ export default function App() {
       )}
 
       {browseOpen && (
-        <BrowseModal open={browseOpen} onClose={() => setBrowseOpen(false)} onPick={openServerFolder} />
+        <BrowseModal
+          open={browseOpen}
+          onClose={() => setBrowseOpen(false)}
+          onPick={openServerFolder}
+          history={history}
+          onRemoveRecent={removeFromHistory}
+        />
       )}
 
       {lightboxIndex !== null && items[lightboxIndex] && (
@@ -316,8 +345,8 @@ export default function App() {
         <CompareView entries={compareEntries} onClose={() => setCompareEntries(null)} />
       )}
 
-      {seedClusters && (
-        <SeedView clusters={seedClusters} onClose={() => setSeedClusters(null)} onOpenPath={openPath} />
+      {seedPath && (
+        <SeedView path={seedPath} onClose={() => setSeedPath(null)} onOpenPath={openPath} />
       )}
     </div>
   );
@@ -326,14 +355,20 @@ export default function App() {
 function Hero({
   onOpenServer,
   onAddImages,
+  history,
+  onOpenRecent,
+  onRemoveRecent,
 }: {
   onOpenServer: () => void;
   onAddImages: (files: File[]) => void;
+  history: HistoryEntry[];
+  onOpenRecent: (path: string) => void;
+  onRemoveRecent: (path: string) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
-    <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-      <div className="animate-fade-in">
+    <div className="flex h-full flex-col items-center justify-center px-6 py-10 text-center">
+      <div className="w-full max-w-xl animate-fade-in">
         <h1 className="text-3xl font-bold tracking-tight text-snow md:text-4xl">
           See how any AI image was made
         </h1>
@@ -367,6 +402,40 @@ function Hero({
             }}
           />
         </div>
+
+        {history.length > 0 && (
+          <div className="mt-10 text-left">
+            <p className="mb-2 text-xs uppercase tracking-widest text-ash">Recent folders</p>
+            <div className="flex flex-col divide-y divide-charcoal/30 overflow-hidden rounded-xl border border-charcoal/40 bg-carbon/40">
+              {history.slice(0, 8).map((h) => (
+                <div key={h.path} className="group flex items-center gap-2 px-3 py-2.5">
+                  <button
+                    onClick={() => onOpenRecent(h.path)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <FolderIcon className="h-4 w-4 flex-shrink-0 text-ash" />
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm text-snow">{h.name}</span>
+                      <span className="block truncate text-xs text-charcoal" title={h.path}>
+                        {h.path}
+                      </span>
+                    </span>
+                  </button>
+                  {h.count != null && (
+                    <span className="flex-shrink-0 text-xs text-ash">{h.count} imgs</span>
+                  )}
+                  <button
+                    onClick={() => onRemoveRecent(h.path)}
+                    title="Remove from history"
+                    className="flex-shrink-0 rounded p-1 text-charcoal opacity-0 transition-opacity hover:text-snow group-hover:opacity-100"
+                  >
+                    <CloseIcon className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

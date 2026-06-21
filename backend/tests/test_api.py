@@ -140,6 +140,18 @@ def test_upload_persists_and_is_browsable():
     assert m.status_code == 200 and m.json()["summary"]["seed"] == "555"
 
 
+def test_history_records_and_lists():
+    r = client.post("/api/history", json={"path": str(_DATA), "count": 3})
+    assert r.status_code == 200
+    h = client.get("/api/history")
+    assert h.status_code == 200
+    assert any(e["path"] == str(_DATA) and e.get("count") == 3 for e in h.json())
+    # Removal works.
+    d = client.request("DELETE", "/api/history", params={"path": str(_DATA)})
+    assert d.status_code == 200
+    assert all(e["path"] != str(_DATA) for e in client.get("/api/history").json())
+
+
 def test_compare():
     paths = ",".join([str(_DATA / "a1111.png"), str(_DATA / "comfy.png")])
     r = client.get("/api/compare", params={"paths": paths})

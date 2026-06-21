@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useToast } from "../lib/toast";
-import type { DirEntry } from "../types";
+import type { DirEntry, HistoryEntry } from "../types";
 import { CloseIcon, FolderIcon } from "./icons";
 import { Spinner } from "./Spinner";
 
@@ -9,10 +9,14 @@ export function BrowseModal({
   open,
   onClose,
   onPick,
+  history,
+  onRemoveRecent,
 }: {
   open: boolean;
   onClose: () => void;
   onPick: (path: string) => void;
+  history: HistoryEntry[];
+  onRemoveRecent: (path: string) => void;
 }) {
   const toast = useToast();
   const [path, setPath] = useState("");
@@ -63,6 +67,37 @@ export function BrowseModal({
             </div>
           ) : (
             <div className="flex flex-col">
+              {path === "" && history.length > 0 && (
+                <div className="mb-2 border-b border-charcoal/30 pb-2">
+                  <p className="px-3 pb-1 pt-2 text-[11px] uppercase tracking-widest text-ash">
+                    Recent
+                  </p>
+                  {history.slice(0, 6).map((h) => (
+                    <div key={h.path} className="group flex items-center gap-2 px-3 py-1.5">
+                      <button
+                        onClick={() => {
+                          onPick(h.path);
+                          onClose();
+                        }}
+                        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                      >
+                        <FolderIcon className="h-4 w-4 flex-shrink-0 text-ash" />
+                        <span className="truncate text-sm text-snow">{h.name}</span>
+                        {h.count != null && (
+                          <span className="flex-shrink-0 text-xs text-charcoal">{h.count}</span>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => onRemoveRecent(h.path)}
+                        title="Remove from history"
+                        className="flex-shrink-0 rounded p-1 text-charcoal opacity-0 transition-opacity hover:text-snow group-hover:opacity-100"
+                      >
+                        <CloseIcon className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
               {parent !== null && (
                 <button
                   onClick={() => load(parent)}

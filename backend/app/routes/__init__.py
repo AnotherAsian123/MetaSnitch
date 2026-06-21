@@ -16,6 +16,7 @@ from ..core.config import get_settings
 from ..core.logging import log_failure
 from ..models import DirEntry
 from ..services import export as export_svc
+from ..services import history as history_svc
 from ..services import index as index_svc
 from ..services import tags as tags_svc
 from ..services.extract import IMAGE_EXTENSIONS
@@ -184,6 +185,29 @@ class TagBody(BaseModel):
     path: str
     favorite: bool | None = None
     tags: list[str] | None = None
+
+
+@router.get("/history")
+def history() -> list[dict]:
+    return history_svc.list_history()
+
+
+class HistoryBody(BaseModel):
+    path: str
+    count: int | None = None
+
+
+@router.post("/history")
+def add_history(body: HistoryBody) -> dict:
+    p = _guard(body.path)
+    return history_svc.record(p, body.count)
+
+
+@router.delete("/history")
+def remove_history(path: str = Query(...)) -> list[dict]:
+    # Allow removing entries even if the folder no longer exists.
+    p = _guard(path, must_exist=False)
+    return history_svc.remove(p)
 
 
 @router.get("/tags")

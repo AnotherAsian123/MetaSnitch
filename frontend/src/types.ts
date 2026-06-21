@@ -20,6 +20,13 @@ export interface CustomNodeDetail {
   settings: Record<string, unknown>;
 }
 
+export interface HistoryEntry {
+  path: string;
+  name: string;
+  last_opened: number;
+  count?: number;
+}
+
 export interface DirEntry {
   name: string;
   path: string;

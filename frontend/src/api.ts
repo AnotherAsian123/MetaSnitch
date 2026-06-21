@@ -1,9 +1,9 @@
-import type { DirEntry, IndexEntry, Metadata, SeedCluster } from "./types";
+import type { DirEntry, HistoryEntry, IndexEntry, Metadata, SeedCluster } from "./types";
 
 const BASE = "/api";
 
-async function getJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+async function getJSON<T>(url: string, method = "GET"): Promise<T> {
+  const res = await fetch(url, { method });
   if (!res.ok) {
     const data = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(data.detail || `Request failed (${res.status})`);
@@ -64,6 +64,18 @@ export const api = {
     }
     return res.json();
   },
+  history: () => getJSON<HistoryEntry[]>(`${BASE}/history`),
+  addHistory: async (path: string, count?: number) => {
+    const res = await fetch(`${BASE}/history`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path, count }),
+    });
+    if (!res.ok) throw new Error("Couldn't record folder");
+    return res.json() as Promise<HistoryEntry>;
+  },
+  removeHistory: (path: string) =>
+    getJSON<HistoryEntry[]>(`${BASE}/history?path=${q(path)}`, "DELETE"),
   thumbUrl: (path: string) => `${BASE}/thumb?path=${q(path)}`,
   imageUrl: (path: string) => `${BASE}/image?path=${q(path)}`,
   exportUrl: (path: string, fmt: string) => `${BASE}/export?path=${q(path)}&fmt=${fmt}`,

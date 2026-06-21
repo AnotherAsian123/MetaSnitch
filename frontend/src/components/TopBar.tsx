@@ -151,7 +151,7 @@ export function TopBar({
           <option value="name">Name</option>
           <option value="size">Size</option>
           {serverMode && <option value="model">Model</option>}
-          {serverMode && <option value="seed">Seed</option>}
+          {serverMode && <option value="seed">Seed (nearest)</option>}
         </select>
 
         {serverMode && (
