@@ -9,7 +9,6 @@ import { LoadingOverlay } from "./components/Spinner";
 import { SeedView } from "./components/SeedView";
 import { TopBar } from "./components/TopBar";
 import { mapLimit } from "./lib/async";
-import { getLocalThumb } from "./lib/localThumbs";
 import { getMeta } from "./lib/metaCache";
 import { clusterBySeed } from "./lib/seed";
 import { useToast } from "./lib/toast";
@@ -55,6 +54,11 @@ export default function App() {
     Array<{ label: string; md: Metadata; src: string }> | null
   >(null);
   const [seedOpen, setSeedOpen] = useState(false);
+  const [seedProximity, setSeedProximity] = useState(0);
+  const [seedClusters, setSeedClusters] = useState<SeedClusterView[] | null>(null);
+  const [seedLoading, setSeedLoading] = useState(false);
+  const [seedError, setSeedError] = useState<string | null>(null);
+  const seedCache = useRef<Map<string, SeedClusterView[]>>(new Map());
   const [dragOver, setDragOver] = useState(false);
   const [uploadsDir, setUploadsDir] = useState<string | null>(null);
   const [pendingOpenPath, setPendingOpenPath] = useState<string | null>(null);
@@ -151,6 +155,8 @@ export default function App() {
   const openServerFolder = (path: string) => {
     setLocalItems(null);
     lastRecorded.current = null; // re-record so reopening bumps recency
+    seedCache.current.clear();
+    setSeedClusters(null);
     setServerFolder(path);
     setSelected(new Set());
     setSearch("");
@@ -176,6 +182,8 @@ export default function App() {
     setServerFolder(null);
     setSelected(new Set());
     setSearch("");
+    seedCache.current.clear();
+    setSeedClusters(null);
     setLocalItems(built);
     setLightboxIndex(openFirst && built.length ? 0 : null);
   };
@@ -236,9 +244,10 @@ export default function App() {
     }
   };
 
-  const openSeeds = () => {
-    if (serverFolder != null || localItems) setSeedOpen(true);
-  };
+  // Stable key for the current image source — invalidates the seed cache when
+  // the folder/local set changes, but persists across opening/closing the window.
+  const sourceKey =
+    serverFolder ?? (localItems ? `local:${localItems.length}:${localItems[0]?.id ?? ""}` : "none");
 
   // Seed clusters for either mode: server uses the backend index; local parses
   // the picked files client-side (bounded concurrency) and clusters in the browser.
@@ -263,14 +272,6 @@ export default function App() {
       if (localItems) {
         const views = await mapLimit(localItems, 6, async (it): Promise<SeedItemView> => {
           const md = await getMeta(it.id, () => loadMeta(it));
-          let thumb = it.kind === "local" ? it.url : api.thumbUrl(it.path);
-          if (it.kind === "local") {
-            try {
-              thumb = await getLocalThumb(it.id, it.file);
-            } catch {
-              thumb = it.url;
-            }
-          }
           const s = md.summary;
           return {
             id: it.id,
@@ -279,7 +280,9 @@ export default function App() {
             model: s.model != null ? String(s.model) : null,
             sampler: s.sampler != null ? String(s.sampler) : null,
             prompt: md.prompt ?? null,
-            thumb,
+            // Use the item's stable object URL — survives the gallery's thumbnail
+            // LRU eviction so persisted clusters never show broken images.
+            thumb: it.kind === "local" ? it.url : api.thumbUrl(it.path),
           };
         });
         return clusterBySeed(views, proximity);
@@ -288,6 +291,43 @@ export default function App() {
     },
     [serverFolder, localItems, loadMeta],
   );
+
+  // Cache results per source+proximity so the window persists across open/close.
+  const computeSeeds = useCallback(
+    async (proximity: number) => {
+      const cacheKey = `${sourceKey}|${proximity}`;
+      const cached = seedCache.current.get(cacheKey);
+      if (cached) {
+        setSeedClusters(cached);
+        setSeedError(null);
+        setSeedLoading(false);
+        return;
+      }
+      setSeedLoading(true);
+      setSeedError(null);
+      try {
+        const clusters = await seedLoader(proximity);
+        seedCache.current.set(cacheKey, clusters);
+        setSeedClusters(clusters);
+      } catch (e) {
+        setSeedError((e as Error).message);
+      } finally {
+        setSeedLoading(false);
+      }
+    },
+    [sourceKey, seedLoader],
+  );
+
+  const openSeeds = () => {
+    if (serverFolder == null && !localItems) return;
+    setSeedOpen(true);
+    computeSeeds(seedProximity);
+  };
+
+  const changeSeedProximity = (p: number) => {
+    setSeedProximity(p);
+    computeSeeds(p);
+  };
 
   const openById = (id: string) => {
     const idx = items.findIndex((i) => i.id === id);
@@ -406,7 +446,15 @@ export default function App() {
       )}
 
       {seedOpen && (
-        <SeedView load={seedLoader} onOpen={openById} onClose={() => setSeedOpen(false)} />
+        <SeedView
+          clusters={seedClusters}
+          loading={seedLoading}
+          error={seedError}
+          proximity={seedProximity}
+          onProximity={changeSeedProximity}
+          onOpen={openById}
+          onClose={() => setSeedOpen(false)}
+        />
       )}
     </div>
   );

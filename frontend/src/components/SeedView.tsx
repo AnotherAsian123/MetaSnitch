@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import type { SeedClusterView, SeedItemView } from "../types";
 import { CloseIcon } from "./icons";
 import { Spinner } from "./Spinner";
@@ -17,30 +16,22 @@ const PROXIMITY_OPTIONS: Array<{ label: string; value: number }> = [
 ];
 
 export function SeedView({
-  load,
+  clusters,
+  loading,
+  error,
+  proximity,
+  onProximity,
   onOpen,
   onClose,
 }: {
-  load: (proximity: number) => Promise<SeedClusterView[]>;
+  clusters: SeedClusterView[] | null;
+  loading: boolean;
+  error: string | null;
+  proximity: number;
+  onProximity: (n: number) => void;
   onOpen: (id: string) => void;
   onClose: () => void;
 }) {
-  const [proximity, setProximity] = useState(0);
-  const [clusters, setClusters] = useState<SeedClusterView[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    setClusters(null);
-    setError(null);
-    load(proximity)
-      .then((c) => alive && setClusters(c))
-      .catch((e) => alive && setError((e as Error).message));
-    return () => {
-      alive = false;
-    };
-  }, [load, proximity]);
-
   return (
     <div className="fixed inset-0 z-50 flex animate-fade-in flex-col bg-black/95 p-4">
       <div className="mb-3 flex items-start justify-between gap-3">
@@ -66,7 +57,7 @@ export function SeedView({
           {PROXIMITY_OPTIONS.map((opt) => (
             <button
               key={opt.value}
-              onClick={() => setProximity(opt.value)}
+              onClick={() => onProximity(opt.value)}
               className={`px-3 py-1.5 transition-colors ${
                 proximity === opt.value ? "bg-snow text-black" : "text-ash hover:text-snow"
               }`}
@@ -75,6 +66,11 @@ export function SeedView({
             </button>
           ))}
         </div>
+        {loading && clusters && (
+          <span className="flex items-center gap-1.5 text-xs text-ash">
+            <Spinner className="h-3.5 w-3.5" /> Updating…
+          </span>
+        )}
         {proximity > 0 && (
           <span className="text-[11px] text-charcoal">
             Note: numerically-close seeds are grouped, but seed proximity isn't visual similarity in
