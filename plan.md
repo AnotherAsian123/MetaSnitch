@@ -5,9 +5,9 @@ images** (Stable Diffusion, HiDream, ComfyUI, A1111, and friends). Designed to
 run as a single Docker container on an Unraid server, but usable from any
 browser on the network.
 
-> This is a planning document. Nothing is built yet. The bottom of this file
-> lists **open decisions** that change the architecture — please confirm those
-> before I start coding.
+> This is a planning document. Nothing is built yet. All major decisions are now
+> **locked** (see §14) and the approved feature set is in scope (see §13). Build
+> is paused pending a final go-ahead.
 
 ---
 
@@ -38,8 +38,9 @@ Key technical points:
   extracting real values); `workflow` is the editor layout (good for display).
   We parse `prompt` for parameters and keep `workflow` available raw.
 - The mature reference implementations are the Python libs **`sd-prompt-reader`**
-  and **`sd-parsers`** — both handle the multi-format detection problem and are
-  good blueprints (and possible dependencies) rather than reinventing it.
+  and **`sd-parsers`**. **Decision (locked):** we write a **thin in-house parser**
+  that borrows their format knowledge (zero runtime dep, full control), and only
+  fall back to pulling in a library if a format proves too gnarly.
 
 ### 1b. Unraid / Docker best practices
 
@@ -64,31 +65,38 @@ Key technical points:
 
 ---
 
-## 2. The pivotal design decision: where do the images live?
+## 2. Where the images live — **both models (locked)**
 
-A browser **cannot** read arbitrary folders on a PC — that's sandboxed. There
-are two viable models, and this choice shapes the whole app:
+A browser **cannot** read arbitrary folders on a PC — that's sandboxed. We
+implement **both** access models, funnelled into **one** server-side parser
+(no duplicate parsing logic in JS):
 
-**Option A — Server-side browsing (recommended for Unraid).**
+**Option A — Server-side browsing (primary, the Unraid-native model).**
 The container has your image shares mounted (e.g. `/mnt/user/AI-Output` →
 `/data` read-only). The app browses *server-side* paths, generates thumbnails
-server-side, and streams them to any browser on the network. This is the natural
-Unraid model: the images live on the array, and it "just works" for network
-paths, shared folders, phones, and any device — nothing is installed client-side.
+server-side, and streams them to any browser on the network. "Just works" for
+network paths, shared folders, phones, and any device — nothing installed
+client-side.
 
-**Option B — Client-side folder picker (File System Access API).**
-Modern Chromium browsers expose `showDirectoryPicker()`, letting the user grant
-the page access to a folder *on the machine running the browser*. Parsing happens
-in the browser. Works without mounting anything, but: Chromium-only (no Firefox/
-Safari, no iOS), and it reads the *client's* disk — not the server's library.
+**Option B — "A folder on my laptop that isn't on the server" (cross-browser).**
+The browser reads files locally and **streams the bytes to the server's parser**
+— so we reuse the one Python parser. Two pickers, chosen by capability:
+- **Chromium** → `showDirectoryPicker()` (File System Access API) for a clean
+  folder grant.
+- **Firefox / Safari** → `<input type="file" webkitdirectory>` fallback, which
+  *does* support folder selection cross-browser (one-time read, not persistent
+  access). **So Firefox is supported.**
+These local files are parsed on the fly; they are **not** added to the library
+unless the user explicitly uploads them (below).
 
-**Recommendation:** Build **Option A as the primary** experience (it's what an
-Unraid app should be), and add **Option B as a progressive enhancement** for the
-"a folder on my laptop that isn't on the server" case. **Drag-and-drop of a
-single image always works in every browser** regardless of model, satisfying the
-"drop an image from anywhere" requirement directly.
+**Upload-to-library (locked → `/config/uploads`).**
+A dropped or picked image can be **persisted** so it joins the browsable gallery
+(thumbnailed + indexed). Uploads are written to a **writable** `/config/uploads`
+location (inside the appdata volume). Your image-library mounts stay **read-only**
+— MetaSnitch never writes to your media shares.
 
-👉 *This is open decision #1 below.*
+**Drag-and-drop of a single image always works in every browser** regardless of
+model, satisfying the "drop an image from anywhere" requirement directly.
 
 ---
 
@@ -120,19 +128,25 @@ database — metadata is read on demand and held in a small bounded cache.
                 │ REST/JSON                                       │ image/webp
 ┌───────────────┴───────────────────────────────────────────────┴─────────────────┐
 │  FastAPI (Uvicorn)                                                                │
-│  GET /api/browse?path=        → list dirs/images (sandboxed to allowed roots)     │
-│  GET /api/thumb?path=         → cached WebP thumbnail (generated on first hit)    │
-│  GET /api/image?path=         → full-size stream                                  │
-│  GET /api/metadata?path=      → parsed, normalized metadata JSON                  │
-│  POST /api/parse (multipart)  → parse a dropped/uploaded image (no disk write)    │
+│  GET  /api/browse?path=&sort=  → list dirs/images, sorted (default: date desc)    │
+│  GET  /api/thumb?path=         → cached WebP thumbnail (generated on first hit)   │
+│  GET  /api/image?path=         → full-size stream                                 │
+│  GET  /api/metadata?path=      → parsed, normalized metadata JSON                 │
+│  POST /api/parse (multipart)   → parse a dropped/picked image (no disk write)     │
+│  POST /api/upload (multipart)  → persist image into /config/uploads, then index   │
+│  GET  /api/search?q=&model=…   → query the lazy folder index (model/sampler/seed) │
+│  GET  /api/compare?paths=a,b   → aligned param diff for A/B (side-by-side)        │
+│  GET  /api/export?path=&fmt=   → folder metadata as CSV or JSON                    │
+│  GET/POST /api/tags            → favorites/tags (flat JSON in /config)            │
 │                                                                                   │
 │  ┌──────────────┐  ┌─────────────────────┐  ┌────────────────────────────────┐   │
-│  │ Path guard   │  │ Metadata parser     │  │ Caches (bounded)               │   │
-│  │ (allowlist)  │  │ A1111│Comfy│NAI│...  │  │ • LRU metadata (~256 entries)  │   │
+│  │ Path guard   │  │ Metadata parser     │  │ Caches & index (bounded)       │   │
+│  │ (allowlist)  │  │ A1111│Comfy│Forge│…  │  │ • LRU metadata (~256 entries)  │   │
 │  └──────────────┘  └─────────────────────┘  │ • Disk thumbnail cache (/config)│  │
+│                                              │ • Lazy folder index (sort/search)│ │
 │                                              └────────────────────────────────┘   │
 └──────────────────────────────────────────────────────────────────────────────────┘
-        mounts:  /data (image shares, :ro)      /config (appdata: cache, logs, settings)
+   mounts:  /data (image shares, :ro)   /config (appdata: cache, logs, settings, uploads, tags)
 ```
 
 ---
@@ -144,14 +158,14 @@ A **parser registry**: each generator gets a small parser implementing
 order and fall back to "raw EXIF/text dump" so *something* always shows.
 
 ```
-parsers/
+parsers/                          # v1 priority: A1111, ComfyUI, Forge
   base.py        # NormalizedMetadata model, registry
-  a1111.py       # 'parameters' string  -> fields
+  a1111.py       # 'parameters' string -> fields  (also handles Forge: same
+                 #   format + a few extra fields; HiDream rides the ComfyUI path)
   comfyui.py     # generic graph walk (custom-node resilient) -> trace key nodes
-  novelai.py     # Comment chunk + stealth-LSB fallback
-  invokeai.py
-  fooocus.py
-  raw.py         # last-resort: dump all tEXt/EXIF/XMP key-values
+  raw.py         # fallback: dump all tEXt/EXIF/XMP key-values so nothing is blank
+  # --- later (not v1) --- novelai.py / invokeai.py / fooocus.py ; until then
+  #     these tools still display via raw.py
 ```
 
 **Normalized output** (so the UI is consistent across tools). Important fields
@@ -250,6 +264,19 @@ lazy-rendered and collapsed, so the UI stays fast.
 | Multiple formats (png/jpg/webp…) | Pillow + format-aware parsers cover PNG/JPEG/WebP/AVIF; unknown types still get a raw dump. |
 | Large amounts of metadata | Summary-first + collapsible groups + lazy raw section keeps render cheap. |
 | Custom nodes & arbitrary workflows | Type-agnostic graph walk + widget-name extraction + reroute/broadcast handling; lists detected node packs & unresolved nodes; always keeps the full graph in a searchable raw viewer (see §5.1). Never errors on unknown nodes. |
+| Sort gallery (default date) + search/filter | One lazy folder index (built during scan) powers both: default sort = date (newest first), plus name/size/model/dimensions/seed; search & filter by model, sampler, seed, or prompt text (see §6.1). |
+
+### 6.1 Gallery sorting + search/filter (one lazy index)
+
+As a folder is scanned we populate a small in-memory index: `path → {date,
+size, dims, model, sampler, seed, prompt}`. This single structure serves both
+needs with no extra passes:
+- **Sort** — **default: date, newest first** (uses embedded generation date when
+  present, else file mtime). Other options: name, size, model, dimensions, seed.
+- **Search / filter** — free-text over prompt, plus structured filters by model,
+  sampler, or seed. Built *lazily* (only fields needed for the index are read up
+  front; full metadata still parses on demand/prefetch), and bounded so big
+  folders stay light. Index is per-session in memory — no DB.
 
 ---
 
@@ -265,7 +292,8 @@ lazy-rendered and collapsed, so the UI stays fast.
 - **Directory scan:** streamed/paginated listing so a 10k-image folder doesn't
   block; grid virtualization means only visible thumbnails mount.
 - **Single-image parse:** reads only header/metadata chunks, never fully decodes
-  pixels (except NovelAI stealth-LSB fallback, which is opt-in).
+  pixels. (The expensive whole-image "stealth-LSB" read is a NovelAI-only concern
+  and is **not in v1** — see §13.)
 
 ---
 
@@ -274,15 +302,19 @@ lazy-rendered and collapsed, so the UI stays fast.
 - **Palette as tokens:** `#08090A` base, `#222823` carbon surfaces, `#575A5E`
   charcoal borders, `#A7A2A9` lilac-ash secondary text, `#F4F7F5` snow primary
   text. Dark, sleek, minimal.
-- **Layout:** top — drop zone + "open folder" + breadcrumb path. Center —
-  virtualized thumbnail grid. Click → lightbox (image + right metadata sidebar;
-  on mobile the sidebar becomes a bottom sheet → STYLE.md §1 responsive).
+- **Layout:** top — drop zone + "open folder" (server / local) + breadcrumb path
+  + **toolbar (sort selector, search box, filter chips)**. Center — virtualized
+  thumbnail grid. Click → lightbox (image + right metadata sidebar; on mobile the
+  sidebar becomes a bottom sheet → STYLE.md §1 responsive).
 - **Bold focus:** the summary params (seed/model/denoise) get the strongest
   contrast; raw blobs are de-emphasized and collapsed.
 - **Motion:** smooth lightbox open, crossfade thumbnails on load, momentum-free
   smooth scroll, no layout jank (STYLE.md §5).
-- **Quality-of-life:** click any value to copy; "copy all parameters" button;
-  keyboard arrows to navigate (drives the ±2 prefetch).
+- **Quality-of-life:** click any value to copy; **"copy as A1111 string"** and
+  **"download original (metadata intact)"** buttons; **multi-select → compare**
+  two images side-by-side with differences highlighted; **favorite/tag** toggle;
+  **export folder → CSV/JSON**; keyboard arrows to navigate (drives the ±2
+  prefetch). Installable as a **PWA** for a native feel on mobile.
 
 ---
 
@@ -325,9 +357,10 @@ MetaSnitch/
 ├─ backend/
 │  ├─ app/
 │  │  ├─ main.py          # FastAPI app + static serving
-│  │  ├─ routes/          # browse, thumb, image, metadata, parse, health
+│  │  ├─ routes/          # browse, thumb, image, metadata, parse, upload,
+│  │  │                   #   search, compare, export, tags, health
 │  │  ├─ parsers/         # registry + per-generator parsers
-│  │  ├─ services/        # thumbnails, scan, cache, path-guard
+│  │  ├─ services/        # thumbnails, scan, index, cache, path-guard, tags
 │  │  ├─ core/            # config (env), logging (dual-variation)
 │  │  └─ models.py        # NormalizedMetadata
 │  ├─ tests/              # parser tests w/ real sample images
@@ -335,58 +368,88 @@ MetaSnitch/
 └─ frontend/
    ├─ src/{components,hooks,api,styles}/
    ├─ index.html  vite.config.ts  tailwind.config.ts
+   ├─ manifest.webmanifest  sw.ts   # PWA: installable + offline shell
    └─ package.json
 ```
 
 ---
 
-## 12. Build phases (each ends verifiable — CLAUDE.md §4)
+## 12. Build phases (everything at once — each still verifiable, CLAUDE.md §4)
 
-1. **Repo + scaffold** → `docker compose up` serves an empty SPA + `/api/health`.
-2. **Parser core** → unit tests parse real A1111 + ComfyUI samples into
-   `NormalizedMetadata` (verify: tests green).
-3. **Single-image path** → drag-drop one image, see correct metadata (verify:
-   drop A1111 PNG + ComfyUI PNG + a WebP, summary fields correct).
-4. **Folder browse + thumbnails + grid** → open a folder, virtualized grid with
-   cached thumbnails + loading animation.
-5. **Lightbox + sidebar + ±2 prefetch** → click→expand, arrow-key nav instant.
-6. **Polish** → palette, animations, responsive/mobile, copy buttons.
-7. **Dockerize + CI** → GHCR image green; Unraid template validated.
+Scope of v1 = the whole app in one build-out (decision #3). Phases are the build
+*order*, not separate releases:
+
+1. **Scaffold + Docker + CI** → `docker compose up` serves SPA + `/api/health`;
+   GHCR workflow in place (watched green per CLAUDE.md).
+2. **Parser core (in-house)** → unit tests parse real A1111/Forge + ComfyUI
+   samples (incl. custom-node graphs) into `NormalizedMetadata` (verify: tests
+   green).
+3. **Single-image path** → drag-drop / local-pick one image → correct metadata
+   (verify: A1111 PNG + ComfyUI PNG + a WebP, summary correct).
+4. **Folder browse + thumbnails + grid + index** → server (Option A) and local
+   (Option B, incl. Firefox `webkitdirectory`); virtualized grid, cached
+   thumbnails, loading animation; lazy index built during scan.
+5. **Sort + search/filter** → default date sort + other options; search by
+   model/sampler/seed/prompt (§6.1).
+6. **Lightbox + sidebar + ±2 prefetch** → click→expand, arrow-key nav instant.
+7. **Power features** → upload-to-`/config/uploads`, copy-as-A1111, download
+   original (metadata intact), side-by-side compare, favorites/tags,
+   export CSV/JSON, `.deut`-style sidecar export.
+8. **Polish + PWA** → palette, animations, responsive/mobile bottom-sheet,
+   installable PWA.
+9. **Unraid template** → Community Apps XML validated (mounts, PUID/PGID, env).
 
 ---
 
-## 13. Suggested improvements / missing features (my additions)
+## 13. Feature set
 
-- **Search & filter** the gallery by model, sampler, seed, or prompt text
-  (indexed lazily as folders are scanned).
-- **Side-by-side compare** two images' parameters (great for A/B tuning).
-- **"Send to clipboard as A1111 string"** — re-serialize any image's params into
+### In scope for v1 (approved)
+- **Sort gallery** — default **date (newest first)**, plus name/size/model/
+  dimensions/seed (§6.1).
+- **Search & filter** by model, sampler, seed, or prompt text — lazy index (§6.1).
+- **Side-by-side compare** two images' parameters, differences highlighted.
+- **Copy as A1111 string** — re-serialize any image's params (incl. ComfyUI) into
   the A1111 paste format for re-generation.
-- **Stealth-LSB toggle** for NovelAI (off by default; it's the only expensive
-  read).
-- **Duplicate/near-identical seed detection** within a folder.
-- **Export** a folder's metadata to CSV/JSON for analysis.
-- **Favorites / tags** persisted in `/config` (no DB — flat JSON).
-- **PWA / installable** so it feels native on mobile (STYLE.md §1).
-- **`.deut`-style sidecar export** for sharing prompts without the image.
+- **Download original (metadata intact)** — also the practical path for sharing to
+  CivitAI, whose uploader auto-parses A1111 metadata.
+- **Export** a folder's metadata to CSV / JSON.
+- **Favorites / tags** persisted in `/config` (flat JSON, no DB), keyed by a
+  stable file fingerprint so they survive moves/renames where possible.
+- **PWA / installable** for a native feel on mobile (STYLE.md §1).
+- **`.deut`-style sidecar export** — share prompt/params without the image.
+- **Upload-to-library** → persists into `/config/uploads` (decision below).
 
-These are proposals — none are in scope unless you say so (CLAUDE.md §2).
+### Later (not v1)
+- **CivitAI deep integration** — a true one-click "publish" is unreliable (their
+  API is mostly read/download + auth-gated). Deferred; the two building blocks
+  above (copy-as-A1111 + download-with-metadata) already make CivitAI sharing
+  easy. Revisit if their API allows it.
+- **NovelAI / InvokeAI / Fooocus** dedicated parsers (they display via `raw.py`
+  until then), and with NovelAI the **stealth-LSB** read.
+  - *Stealth-LSB, plainly:* some tools hide metadata **inside the pixels** (tiny,
+    invisible tweaks to color/alpha bits) instead of the file header, so it
+    survives metadata stripping. Reading it means decoding the whole image —
+    comparatively slow — which is why it'd be an off-by-default toggle, and why
+    it's deferred with NovelAI.
+- **Duplicate / near-identical seed detection** within a folder.
 
 ---
 
-## 14. Open decisions (need your call before I build)
+## 14. Decisions — **locked**
 
-1. **Folder access model** — Option A (server-side, mounted Unraid shares,
-   recommended), Option B (client-side File System Access API), or **both**?
-   This is the biggest architectural fork.
-2. **Parsing approach** — depend on the mature `sd-prompt-reader`/`sd-parsers`
-   libraries (faster, battle-tested) vs. a lean in-house parser (zero deps, full
-   control, more code)? I lean toward a thin in-house core that borrows their
-   format knowledge, falling back to a lib only if needed.
-3. **Scope of v1** — ship phases 1–6 (full app, run via `docker compose`) first
-   and add CI/GHCR/Unraid template (phase 7) after, or do everything in one go?
-4. **Generator priority** — confirmed: A1111, ComfyUI, HiDream(=ComfyUI). Want
-   NovelAI / InvokeAI / Fooocus in v1 too, or later?
+1. **Folder access model** → **both** (§2). Option A server-side (primary) +
+   Option B local-folder picker, cross-browser via `showDirectoryPicker()`
+   (Chromium) and `webkitdirectory` (Firefox/Safari). Local files stream to the
+   one server-side parser.
+2. **Parsing approach** → **thin in-house parser** that borrows
+   `sd-prompt-reader`/`sd-parsers` format knowledge; pull in a lib only if a
+   format proves too gnarly.
+3. **Scope of v1** → **everything at once** (full app + dual-variation logging +
+   GHCR CI + Unraid template + PWA + all §13 in-scope features).
+4. **Generators** → **A1111, ComfyUI, Forge** (Forge = A1111 format + extras;
+   HiDream rides ComfyUI). Everything else displays via the `raw.py` fallback.
+5. **Upload target** → **`/config/uploads`** (writable, in appdata). Image-library
+   mounts stay read-only.
 
 ---
 
