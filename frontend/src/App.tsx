@@ -8,10 +8,20 @@ import { Lightbox } from "./components/Lightbox";
 import { LoadingOverlay } from "./components/Spinner";
 import { SeedView } from "./components/SeedView";
 import { TopBar } from "./components/TopBar";
+import { mapLimit } from "./lib/async";
+import { getLocalThumb } from "./lib/localThumbs";
 import { getMeta } from "./lib/metaCache";
+import { clusterBySeed } from "./lib/seed";
 import { useToast } from "./lib/toast";
 import { useDebounce } from "./lib/useDebounce";
-import type { GalleryItem, HistoryEntry, Metadata, SortKey } from "./types";
+import type {
+  GalleryItem,
+  HistoryEntry,
+  Metadata,
+  SeedClusterView,
+  SeedItemView,
+  SortKey,
+} from "./types";
 
 let localCounter = 0;
 
@@ -44,7 +54,7 @@ export default function App() {
   const [compareEntries, setCompareEntries] = useState<
     Array<{ label: string; md: Metadata; src: string }> | null
   >(null);
-  const [seedPath, setSeedPath] = useState<string | null>(null);
+  const [seedOpen, setSeedOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [uploadsDir, setUploadsDir] = useState<string | null>(null);
   const [pendingOpenPath, setPendingOpenPath] = useState<string | null>(null);
@@ -227,7 +237,64 @@ export default function App() {
   };
 
   const openSeeds = () => {
-    if (serverFolder) setSeedPath(serverFolder);
+    if (serverFolder != null || localItems) setSeedOpen(true);
+  };
+
+  // Seed clusters for either mode: server uses the backend index; local parses
+  // the picked files client-side (bounded concurrency) and clusters in the browser.
+  const seedLoader = useCallback(
+    async (proximity: number): Promise<SeedClusterView[]> => {
+      if (serverFolder != null) {
+        const clusters = await api.seeds(serverFolder, proximity);
+        return clusters.map((c) => ({
+          seed: c.seed,
+          count: c.count,
+          items: c.items.map((e) => ({
+            id: e.path,
+            name: e.name,
+            seed: e.seed ?? null,
+            model: e.model ?? null,
+            sampler: e.sampler ?? null,
+            prompt: e.prompt ?? null,
+            thumb: api.thumbUrl(e.path),
+          })),
+        }));
+      }
+      if (localItems) {
+        const views = await mapLimit(localItems, 6, async (it): Promise<SeedItemView> => {
+          const md = await getMeta(it.id, () => loadMeta(it));
+          let thumb = it.kind === "local" ? it.url : api.thumbUrl(it.path);
+          if (it.kind === "local") {
+            try {
+              thumb = await getLocalThumb(it.id, it.file);
+            } catch {
+              thumb = it.url;
+            }
+          }
+          const s = md.summary;
+          return {
+            id: it.id,
+            name: it.name,
+            seed: s.seed != null ? String(s.seed) : null,
+            model: s.model != null ? String(s.model) : null,
+            sampler: s.sampler != null ? String(s.sampler) : null,
+            prompt: md.prompt ?? null,
+            thumb,
+          };
+        });
+        return clusterBySeed(views, proximity);
+      }
+      return [];
+    },
+    [serverFolder, localItems, loadMeta],
+  );
+
+  const openById = (id: string) => {
+    const idx = items.findIndex((i) => i.id === id);
+    if (idx >= 0) {
+      setSeedOpen(false);
+      setLightboxIndex(idx);
+    }
   };
 
   const removeFromHistory = (p: string) => {
@@ -239,14 +306,6 @@ export default function App() {
     const a = document.createElement("a");
     a.href = api.exportUrl(serverFolder, fmt);
     a.click();
-  };
-
-  const openPath = (path: string) => {
-    const idx = items.findIndex((i) => i.kind === "server" && i.path === path);
-    if (idx >= 0) {
-      setSeedPath(null);
-      setLightboxIndex(idx);
-    }
   };
 
   const hasSource = serverMode || !!localItems;
@@ -277,6 +336,7 @@ export default function App() {
         onOpenUploads={uploadsDir ? () => openServerFolder(uploadsDir) : undefined}
         onCompare={openCompare}
         onClearSelection={() => setSelected(new Set())}
+        seedsEnabled={items.length > 0}
         onSeeds={openSeeds}
         onExport={doExport}
       />
@@ -345,8 +405,8 @@ export default function App() {
         <CompareView entries={compareEntries} onClose={() => setCompareEntries(null)} />
       )}
 
-      {seedPath && (
-        <SeedView path={seedPath} onClose={() => setSeedPath(null)} onOpenPath={openPath} />
+      {seedOpen && (
+        <SeedView load={seedLoader} onOpen={openById} onClose={() => setSeedOpen(false)} />
       )}
     </div>
   );

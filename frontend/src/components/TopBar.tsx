@@ -19,6 +19,7 @@ export function TopBar({
   onOpenUploads,
   onCompare,
   onClearSelection,
+  seedsEnabled,
   onSeeds,
   onExport,
 }: {
@@ -35,6 +36,7 @@ export function TopBar({
   onOpenUploads?: () => void;
   onCompare: () => void;
   onClearSelection: () => void;
+  seedsEnabled: boolean;
   onSeeds: () => void;
   onExport: (fmt: "csv" | "json") => void;
 }) {
@@ -154,30 +156,30 @@ export function TopBar({
           {serverMode && <option value="seed">Seed (nearest)</option>}
         </select>
 
+        {seedsEnabled && (
+          <button
+            onClick={onSeeds}
+            title="Seed analysis"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-charcoal/50 px-2.5 py-1.5 text-sm text-ash transition-colors hover:border-ash hover:text-snow"
+          >
+            <SeedIcon className="h-4 w-4" />
+          </button>
+        )}
         {serverMode && (
-          <>
+          <div className="flex overflow-hidden rounded-lg border border-charcoal/50">
             <button
-              onClick={onSeeds}
-              title="Seed analysis"
-              className="inline-flex items-center gap-1.5 rounded-lg border border-charcoal/50 px-2.5 py-1.5 text-sm text-ash transition-colors hover:border-ash hover:text-snow"
+              onClick={() => onExport("csv")}
+              className="px-2.5 py-1.5 text-xs text-ash transition-colors hover:bg-black/30 hover:text-snow"
             >
-              <SeedIcon className="h-4 w-4" />
+              CSV
             </button>
-            <div className="flex overflow-hidden rounded-lg border border-charcoal/50">
-              <button
-                onClick={() => onExport("csv")}
-                className="px-2.5 py-1.5 text-xs text-ash transition-colors hover:bg-black/30 hover:text-snow"
-              >
-                CSV
-              </button>
-              <button
-                onClick={() => onExport("json")}
-                className="border-l border-charcoal/50 px-2.5 py-1.5 text-xs text-ash transition-colors hover:bg-black/30 hover:text-snow"
-              >
-                JSON
-              </button>
-            </div>
-          </>
+            <button
+              onClick={() => onExport("json")}
+              className="border-l border-charcoal/50 px-2.5 py-1.5 text-xs text-ash transition-colors hover:bg-black/30 hover:text-snow"
+            >
+              JSON
+            </button>
+          </div>
         )}
 
         {selectedCount > 0 && (

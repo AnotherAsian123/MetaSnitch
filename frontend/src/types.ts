@@ -42,6 +42,23 @@ export interface SeedCluster {
   items: IndexEntry[];
 }
 
+// Mode-agnostic shapes the SeedView renders (server paths or local files).
+export interface SeedItemView {
+  id: string;
+  name: string;
+  seed: string | null;
+  model: string | null;
+  sampler: string | null;
+  prompt: string | null;
+  thumb: string;
+}
+
+export interface SeedClusterView {
+  seed: string;
+  count: number;
+  items: SeedItemView[];
+}
+
 export interface IndexEntry {
   name: string;
   path: string;

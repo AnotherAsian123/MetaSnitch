@@ -450,7 +450,8 @@ Scope of v1 = the whole app in one build-out (decision #3). Phases are the build
 - **Upload-to-library** → persists into `/config/uploads` (decision below).
 - **Seed analysis** — group/cluster a folder by seed and study how a shared seed
   behaves across different prompts and settings (see §6.2), with nearest-neighbour
-  proximity grouping and a thumbnail strip per cluster.
+  proximity grouping and a thumbnail strip per cluster. Works for **server folders**
+  (backend index) and **local folders** (files parsed + clustered client-side).
 - **Recent folders** — analysed directories are recorded in `/config/history.json`
   and listed (with image counts) on the home screen and browse dialog for one-click
   reopen across sessions.

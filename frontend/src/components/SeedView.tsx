@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
-import type { IndexEntry, SeedCluster } from "../types";
+import type { SeedClusterView, SeedItemView } from "../types";
 import { CloseIcon } from "./icons";
 import { Spinner } from "./Spinner";
 
-const PARAM_COLS: Array<{ key: keyof IndexEntry; label: string }> = [
+const PARAM_COLS: Array<{ key: keyof SeedItemView; label: string }> = [
   { key: "model", label: "Model" },
   { key: "sampler", label: "Sampler" },
   { key: "prompt", label: "Prompt" },
@@ -18,30 +17,29 @@ const PROXIMITY_OPTIONS: Array<{ label: string; value: number }> = [
 ];
 
 export function SeedView({
-  path,
+  load,
+  onOpen,
   onClose,
-  onOpenPath,
 }: {
-  path: string;
+  load: (proximity: number) => Promise<SeedClusterView[]>;
+  onOpen: (id: string) => void;
   onClose: () => void;
-  onOpenPath: (path: string) => void;
 }) {
   const [proximity, setProximity] = useState(0);
-  const [clusters, setClusters] = useState<SeedCluster[] | null>(null);
+  const [clusters, setClusters] = useState<SeedClusterView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     setClusters(null);
     setError(null);
-    api
-      .seeds(path, proximity)
+    load(proximity)
       .then((c) => alive && setClusters(c))
       .catch((e) => alive && setError((e as Error).message));
     return () => {
       alive = false;
     };
-  }, [path, proximity]);
+  }, [load, proximity]);
 
   return (
     <div className="fixed inset-0 z-50 flex animate-fade-in flex-col bg-black/95 p-4">
@@ -88,8 +86,9 @@ export function SeedView({
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pb-8 pr-1">
         {error && <p className="py-16 text-center text-sm text-red-300">{error}</p>}
         {!clusters && !error && (
-          <div className="flex justify-center py-16">
+          <div className="flex flex-col items-center gap-3 py-16 text-ash">
             <Spinner className="h-6 w-6 text-snow" />
+            <p className="text-xs">Reading seeds…</p>
           </div>
         )}
         {clusters && clusters.length === 0 && (
@@ -110,13 +109,13 @@ export function SeedView({
             <div className="flex gap-3 overflow-x-auto p-3">
               {cluster.items.map((item) => (
                 <button
-                  key={item.path}
-                  onClick={() => onOpenPath(item.path)}
+                  key={item.id}
+                  onClick={() => onOpen(item.id)}
                   className="group flex w-28 flex-shrink-0 flex-col gap-1.5 text-left"
                   title={item.name}
                 >
                   <img
-                    src={api.thumbUrl(item.path)}
+                    src={item.thumb}
                     alt={item.name}
                     loading="lazy"
                     decoding="async"
@@ -143,7 +142,7 @@ export function SeedView({
                 </thead>
                 <tbody>
                   {cluster.items.map((item) => (
-                    <tr key={item.path} className="border-t border-charcoal/10">
+                    <tr key={item.id} className="border-t border-charcoal/10">
                       <td className="max-w-[12rem] truncate p-3 text-snow">{item.name}</td>
                       <td className="p-3 font-mono text-ash">{item.seed ?? "—"}</td>
                       {PARAM_COLS.map((c) => (
