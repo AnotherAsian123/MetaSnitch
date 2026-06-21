@@ -136,6 +136,7 @@ database — metadata is read on demand and held in a small bounded cache.
 │  POST /api/upload (multipart)  → persist image into /config/uploads, then index   │
 │  GET  /api/search?q=&model=…   → query the lazy folder index (model/sampler/seed) │
 │  GET  /api/compare?paths=a,b   → aligned param diff for A/B (side-by-side)        │
+│  GET  /api/seeds?path=         → group by seed: clusters + cross-param matrix      │
 │  GET  /api/export?path=&fmt=   → folder metadata as CSV or JSON                    │
 │  GET/POST /api/tags            → favorites/tags (flat JSON in /config)            │
 │                                                                                   │
@@ -278,6 +279,30 @@ needs with no extra passes:
   front; full metadata still parses on demand/prefetch), and bounded so big
   folders stay light. Index is per-session in memory — no DB.
 
+### 6.2 Seed analysis (how a seed behaves across prompts & settings)
+
+Built on the same index + compare engine. **Important caveat baked into the
+design:** numerically-close seeds are *not* visually related in diffusion, so the
+default groups by **exact seed**; numeric-proximity is an optional mode clearly
+labelled as such.
+
+- **Group / cluster by seed** — collapse the gallery into seed groups; **sort
+  groups by size** (most-reused seeds first) or by seed value. Each group shows
+  its thumbnails together.
+- **Seed study view** — pick a seed (or group) → a matrix of every image using
+  it, with a **parameter-diff table** showing exactly *what varied* (prompt, cfg,
+  steps, sampler, scheduler, model, denoise) and what stayed fixed — the seed
+  held constant while other knobs change. This is the A/B-tuning insight you're
+  after, generalized to N images.
+- **Pivot the other way** — hold a prompt (or model) constant and lay images out
+  *by seed* to see seed-to-seed variation under fixed settings (an X/Y-plot feel).
+- **Optional numeric-proximity grouping** — bucket seeds within ±N of each other,
+  with an inline note that proximity ≠ visual similarity (off by default).
+- **Cheap** — all of this reads from the in-memory index (group-by on a field we
+  already have); full metadata still loads lazily/prefetched only for the images
+  on screen. New endpoint: `GET /api/seeds?path=` → seed clusters + cross-param
+  matrix.
+
 ---
 
 ## 7. Performance & caching (STYLE.md §2 — no bloat)
@@ -393,8 +418,8 @@ Scope of v1 = the whole app in one build-out (decision #3). Phases are the build
    model/sampler/seed/prompt (§6.1).
 6. **Lightbox + sidebar + ±2 prefetch** → click→expand, arrow-key nav instant.
 7. **Power features** → upload-to-`/config/uploads`, copy-as-A1111, download
-   original (metadata intact), side-by-side compare, favorites/tags,
-   export CSV/JSON, `.deut`-style sidecar export.
+   original (metadata intact), side-by-side compare, **seed analysis (§6.2)**,
+   favorites/tags, export CSV/JSON, `.deut`-style sidecar export.
 8. **Polish + PWA** → palette, animations, responsive/mobile bottom-sheet,
    installable PWA.
 9. **Unraid template** → Community Apps XML validated (mounts, PUID/PGID, env).
@@ -418,6 +443,8 @@ Scope of v1 = the whole app in one build-out (decision #3). Phases are the build
 - **PWA / installable** for a native feel on mobile (STYLE.md §1).
 - **`.deut`-style sidecar export** — share prompt/params without the image.
 - **Upload-to-library** → persists into `/config/uploads` (decision below).
+- **Seed analysis** — group/cluster a folder by seed and study how a shared seed
+  behaves across different prompts and settings (see §6.2).
 
 ### Later (not v1)
 - **CivitAI deep integration** — a true one-click "publish" is unreliable (their
@@ -431,7 +458,6 @@ Scope of v1 = the whole app in one build-out (decision #3). Phases are the build
     survives metadata stripping. Reading it means decoding the whole image —
     comparatively slow — which is why it'd be an off-by-default toggle, and why
     it's deferred with NovelAI.
-- **Duplicate / near-identical seed detection** within a folder.
 
 ---
 
