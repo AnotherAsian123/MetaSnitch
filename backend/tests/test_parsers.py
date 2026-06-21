@@ -112,6 +112,31 @@ def test_comfy_custom_decoupled_stack():
     assert "clip" not in detail["settings"]  # link inputs are connections, not settings
 
 
+# Flux-style: negative is the positive conditioning fed through ConditioningZeroOut.
+COMFY_ZEROOUT_NEG = {
+    "4": {"class_type": "UNETLoader", "inputs": {"unet_name": "flux1-dev.safetensors"}},
+    "5": {"class_type": "EmptySD3LatentImage", "inputs": {"width": 1024, "height": 1024}},
+    "10": {"class_type": "DualCLIPLoader", "inputs": {"clip_name1": "t5xxl", "clip_name2": "clip_l"}},
+    "6": {"class_type": "CLIPTextEncode", "inputs": {"text": "a majestic lion, golden hour", "clip": ["10", 0]}},
+    "16": {"class_type": "ConditioningZeroOut", "inputs": {"conditioning": ["6", 0]}},
+    "3": {"class_type": "KSampler", "inputs": {
+        "seed": 7, "steps": 20, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple",
+        "denoise": 1.0, "model": ["4", 0], "positive": ["6", 0], "negative": ["16", 0],
+        "latent_image": ["5", 0]}},
+    "11": {"class_type": "VAELoader", "inputs": {"vae_name": "ae.safetensors"}},
+    "8": {"class_type": "VAEDecode", "inputs": {"samples": ["3", 0], "vae": ["11", 0]}},
+    "9": {"class_type": "SaveImage", "inputs": {"images": ["8", 0]}},
+}
+
+
+def test_comfy_zeroout_negative_not_echoed():
+    md = parse_source(_png_with_text(prompt=json.dumps(COMFY_ZEROOUT_NEG)))
+    assert md.source == "ComfyUI"
+    assert md.prompt == "a majestic lion, golden hour"
+    # The negative is a zeroed-out copy of the positive -> must not echo it.
+    assert md.negative_prompt is None
+
+
 def test_unknown_falls_back_to_raw():
     md = parse_source(_png_with_text(Comment="some unrecognized blob"))
     assert md.groups  # raw metadata surfaced, never blank

@@ -40,7 +40,8 @@ _STOCK = {
     "LoraLoaderModelOnly", "ControlNetApply", "ControlNetLoader", "UNETLoader",
     "DualCLIPLoader", "CLIPLoader", "SamplerCustom", "SamplerCustomAdvanced",
     "RandomNoise", "BasicScheduler", "KSamplerSelect", "CFGGuider", "BasicGuider",
-    "ConditioningCombine", "ConditioningConcat", "LatentUpscale", "ImageScale",
+    "ConditioningCombine", "ConditioningConcat", "ConditioningZeroOut",
+    "LatentUpscale", "ImageScale",
     "ModelSamplingFlux", "FluxGuidance", "PrimitiveNode", "Note", "Reroute",
 }
 
@@ -216,7 +217,14 @@ class ComfyUIParser(Parser):
         )
 
     def _prompts(self, nodes, inputs, node, sampler_id, scope):
-        def text_upstream(start):
+        def resolve(start):
+            """BFS upstream from a conditioning input.
+
+            Returns (text, encoder_node_id, zeroed). `zeroed` is True when the
+            chain passes through a ConditioningZeroOut — common for Flux-style
+            negatives, where the negative is the positive conditioning zeroed out,
+            so it carries no real negative text and must NOT echo the positive.
+            """
             queue = [str(start)]
             seen = set()
             while queue:
@@ -227,41 +235,54 @@ class ComfyUIParser(Parser):
                 n = node(cur)
                 if not n:
                     continue
+                ct = _class(n).lower().replace("_", "")
+                if "zeroout" in ct or "conditioningzero" in ct:
+                    return (None, None, True)
                 ins = inputs(n)
                 for key in ("text", "text_g", "text_l", "prompt", "wildcard_text"):
                     if key in ins and isinstance(ins[key], str):
-                        return ins[key]
+                        return (ins[key], cur, False)
                 for v in ins.values():
                     if _is_link(v):
                         queue.append(str(v[0]))
-            return None
+            return (None, None, False)
 
-        pos = neg = None
+        pos_text = pos_id = None
+        neg_text = neg_id = None
+
+        def set_neg(start):
+            nonlocal neg_text, neg_id
+            text, nid, zeroed = resolve(start)
+            neg_text, neg_id = (None, None) if zeroed else (text, nid)
+
         if sampler_id is not None:
             ins = inputs(node(sampler_id))
             if _is_link(ins.get("positive")):
-                pos = text_upstream(ins["positive"][0])
+                pos_text, pos_id, _ = resolve(ins["positive"][0])
             if _is_link(ins.get("negative")):
-                neg = text_upstream(ins["negative"][0])
-            if pos is None and _is_link(ins.get("guider")):
+                set_neg(ins["negative"][0])
+            if pos_text is None and _is_link(ins.get("guider")):
                 gins = inputs(node(ins["guider"][0]))
                 for key in ("positive", "conditioning"):
-                    if pos is None and _is_link(gins.get(key)):
-                        pos = text_upstream(gins[key][0])
+                    if pos_text is None and _is_link(gins.get(key)):
+                        pos_text, pos_id, _ = resolve(gins[key][0])
                 if _is_link(gins.get("negative")):
-                    neg = text_upstream(gins["negative"][0])
+                    set_neg(gins["negative"][0])
 
-        if pos is None:
-            texts = []
+        # If the negative resolves to the very same encoder as the positive, it is
+        # not a distinct negative — don't report the positive prompt as negative.
+        if neg_id is not None and neg_id == pos_id:
+            neg_text = None
+
+        if pos_text is None:
             for i in scope:
                 n = node(i)
                 if "cliptextencode" in _class(n).lower():
                     ins = inputs(n)
                     if isinstance(ins.get("text"), str):
-                        texts.append(ins["text"])
-            if texts:
-                pos = texts[0]
-        return pos, neg
+                        pos_text = ins["text"]
+                        break
+        return pos_text, neg_text
 
     def _loras(self, nodes) -> list[dict]:
         out: list[dict] = []
