@@ -309,7 +309,9 @@ labelled as such.
 
 - **Thumbnails:** server images → WebP thumbnails generated once on first
   request, written to `/config/thumbnails` keyed by path+mtime+size, served
-  thereafter. Local-folder images → downscaled **client-side** to a small WebP
+  thereafter. Generation uses **libvips** (`pyvips`) — shrink-on-load,
+  multi-threaded, ~10x faster than Pillow — with an automatic tuned-Pillow
+  fallback (`draft()`/`reducing_gap` shrink-on-load) when libvips is absent. Local-folder images → downscaled **client-side** to a small WebP
   via `createImageBitmap` + `OffscreenCanvas` (lazy, on-screen cells only,
   bounded self-revoking cache) so huge folders scroll smoothly instead of
   decoding full-resolution files per cell.
