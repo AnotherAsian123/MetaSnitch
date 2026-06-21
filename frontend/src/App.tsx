@@ -44,6 +44,9 @@ export default function App() {
   const [compareEntries, setCompareEntries] = useState<Array<{ label: string; md: Metadata }> | null>(null);
   const [seedClusters, setSeedClusters] = useState<SeedCluster[] | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [uploadsDir, setUploadsDir] = useState<string | null>(null);
+  const [pendingOpenPath, setPendingOpenPath] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
 
   const serverMode = serverFolder != null;
   const localUrls = useRef<string[]>([]);
@@ -96,7 +99,28 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [serverFolder, localItems, sort, debounced, toast]);
+  }, [serverFolder, localItems, sort, debounced, reload, toast]);
+
+  // Discover the persistent uploads folder so it can be revisited across sessions.
+  useEffect(() => {
+    api
+      .roots()
+      .then((rs) => {
+        const u = rs.find((r) => /[/\\]uploads$/.test(r.path));
+        if (u) setUploadsDir(u.path);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  // After uploading a single image, open it in the lightbox once it appears.
+  useEffect(() => {
+    if (!pendingOpenPath) return;
+    const idx = items.findIndex((i) => i.kind === "server" && i.path === pendingOpenPath);
+    if (idx >= 0) {
+      setLightboxIndex(idx);
+      setPendingOpenPath(null);
+    }
+  }, [items, pendingOpenPath]);
 
   const openServerFolder = (path: string) => {
     setLocalItems(null);
@@ -131,12 +155,34 @@ export default function App() {
 
   useEffect(() => () => localUrls.current.forEach((u) => URL.revokeObjectURL(u)), []);
 
-  // Global drag-and-drop of one or more images from anywhere.
+  // Persist uploaded/dropped images server-side (/config/uploads) so they get
+  // real thumbnails and survive across sessions, then show that folder. Adding
+  // more later just uploads more into the same folder.
+  const addUploads = async (files: File[]) => {
+    const imgs = files.filter((f) => f.type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|tiff?|avif|jfif)$/i.test(f.name));
+    if (!imgs.length) return;
+    setLoading(true);
+    try {
+      const results = await Promise.all(imgs.map((f) => api.uploadFile(f)));
+      const dir = results[0].path.replace(/[/\\][^/\\]*$/, "");
+      setUploadsDir(dir);
+      if (imgs.length === 1) setPendingOpenPath(results[0].path);
+      if (serverFolder === dir) setReload((r) => r + 1);
+      else openServerFolder(dir);
+      toast(`Added ${results.length} image${results.length === 1 ? "" : "s"} to your library`, "success");
+    } catch (e) {
+      toast((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Global drag-and-drop of one or more images from anywhere → persisted upload.
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const files = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith("image/"));
-    if (files.length) setLocalFiles(files, files.length === 1);
+    if (files.length) void addUploads(files);
   };
 
   const toggleSelect = (id: string) =>
@@ -210,6 +256,8 @@ export default function App() {
         selectedCount={selected.size}
         onOpenServer={() => setBrowseOpen(true)}
         onLocalFiles={(files) => setLocalFiles(files)}
+        onAddImages={addUploads}
+        onOpenUploads={uploadsDir ? () => openServerFolder(uploadsDir) : undefined}
         onCompare={openCompare}
         onClearSelection={() => setSelected(new Set())}
         onSeeds={openSeeds}
@@ -220,7 +268,7 @@ export default function App() {
         {loading && items.length === 0 ? (
           <LoadingOverlay label={serverMode ? "Reading folder…" : "Loading images…"} />
         ) : !hasSource ? (
-          <Hero onOpenServer={() => setBrowseOpen(true)} onLocalFiles={(f) => setLocalFiles(f)} />
+          <Hero onOpenServer={() => setBrowseOpen(true)} onAddImages={addUploads} />
         ) : items.length === 0 ? (
           <div className="flex h-full items-center justify-center text-center text-ash">
             <p>No images found here.</p>
@@ -277,10 +325,10 @@ export default function App() {
 
 function Hero({
   onOpenServer,
-  onLocalFiles,
+  onAddImages,
 }: {
   onOpenServer: () => void;
-  onLocalFiles: (files: File[]) => void;
+  onAddImages: (files: File[]) => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   return (
@@ -290,8 +338,8 @@ function Hero({
           See how any AI image was made
         </h1>
         <p className="mx-auto mt-3 max-w-md text-ash">
-          Drag an image anywhere on this page, open a folder on your server, or pick one from this
-          device. MetaSnitch reads the generation parameters instantly.
+          Drag images anywhere on this page, open a folder on your server, or choose images from
+          this device. Dropped images are saved to your library and persist between sessions.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <button
@@ -314,7 +362,7 @@ function Hero({
             className="hidden"
             onChange={(e) => {
               const files = Array.from(e.target.files ?? []);
-              if (files.length) onLocalFiles(files);
+              if (files.length) onAddImages(files);
               e.target.value = "";
             }}
           />

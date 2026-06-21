@@ -116,6 +116,30 @@ def test_path_guard_blocks_outside():
     assert r.status_code == 400
 
 
+def test_upload_persists_and_is_browsable():
+    import os
+
+    buf = io.BytesIO()
+    img = Image.new("RGB", (8, 8))
+    meta = PngImagePlugin.PngInfo()
+    meta.add_text("parameters", A1111)
+    img.save(buf, format="PNG", pnginfo=meta)
+    buf.seek(0)
+    r = client.post("/api/upload", files={"file": ("persisted.png", buf, "image/png")})
+    assert r.status_code == 200
+    path = r.json()["path"]
+
+    # The uploads folder is an allowed root and now contains the file.
+    updir = os.path.dirname(path)
+    b = client.get("/api/browse", params={"path": updir})
+    assert b.status_code == 200
+    assert os.path.basename(path) in {e["name"] for e in b.json()["entries"]}
+
+    # And its metadata is readable through the normal endpoint.
+    m = client.get("/api/metadata", params={"path": path})
+    assert m.status_code == 200 and m.json()["summary"]["seed"] == "555"
+
+
 def test_compare():
     paths = ",".join([str(_DATA / "a1111.png"), str(_DATA / "comfy.png")])
     r = client.get("/api/compare", params={"paths": paths})

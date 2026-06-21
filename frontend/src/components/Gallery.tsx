@@ -1,14 +1,11 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
+import { getLocalThumb } from "../lib/localThumbs";
 import type { GalleryItem } from "../types";
 
 const TARGET_CELL = 184; // px
 const GAP = 12;
-
-function thumbSrc(item: GalleryItem): string {
-  return item.kind === "server" ? api.thumbUrl(item.path) : item.url;
-}
 
 function Cell({
   item,
@@ -22,6 +19,28 @@ function Cell({
   onToggleSelect: (e: React.MouseEvent) => void;
 }) {
   const [loaded, setLoaded] = useState(false);
+  // Server: cached WebP thumbnail endpoint. Local: generate a downscaled WebP
+  // (lazily, only for on-screen cells) instead of rendering the full-res file.
+  const [src, setSrc] = useState<string | null>(
+    item.kind === "server" ? api.thumbUrl(item.path) : null,
+  );
+
+  useEffect(() => {
+    if (item.kind === "server") {
+      setSrc(api.thumbUrl(item.path));
+      return;
+    }
+    let alive = true;
+    setSrc(null);
+    setLoaded(false);
+    getLocalThumb(item.id, item.file)
+      .then((url) => alive && setSrc(url))
+      .catch(() => alive && setSrc(item.url));
+    return () => {
+      alive = false;
+    };
+  }, [item]);
+
   return (
     <button
       onClick={(e) => (e.shiftKey || e.metaKey || e.ctrlKey ? onToggleSelect(e) : onOpen())}
@@ -30,16 +49,19 @@ function Cell({
       }`}
       title={item.name}
     >
-      {!loaded && <div className="skeleton absolute inset-0" />}
-      <img
-        src={thumbSrc(item)}
-        alt={item.name}
-        loading="lazy"
-        onLoad={() => setLoaded(true)}
-        className={`h-full w-full object-cover transition-all duration-300 group-hover:scale-[1.04] ${
-          loaded ? "opacity-100" : "opacity-0"
-        }`}
-      />
+      {(!loaded || !src) && <div className="skeleton absolute inset-0" />}
+      {src && (
+        <img
+          src={src}
+          alt={item.name}
+          loading="lazy"
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          className={`h-full w-full object-cover transition-all duration-300 group-hover:scale-[1.04] ${
+            loaded ? "opacity-100" : "opacity-0"
+          }`}
+        />
+      )}
       <div className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-2 bg-gradient-to-t from-black/80 to-transparent p-2 opacity-0 transition-all duration-200 group-hover:translate-y-0 group-hover:opacity-100">
         <p className="truncate text-left text-xs text-snow">{item.name}</p>
       </div>

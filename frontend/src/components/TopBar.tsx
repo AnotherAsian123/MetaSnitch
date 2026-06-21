@@ -15,6 +15,8 @@ export function TopBar({
   selectedCount,
   onOpenServer,
   onLocalFiles,
+  onAddImages,
+  onOpenUploads,
   onCompare,
   onClearSelection,
   onSeeds,
@@ -29,12 +31,15 @@ export function TopBar({
   selectedCount: number;
   onOpenServer: () => void;
   onLocalFiles: (files: File[]) => void;
+  onAddImages: (files: File[]) => void;
+  onOpenUploads?: () => void;
   onCompare: () => void;
   onClearSelection: () => void;
   onSeeds: () => void;
   onExport: (fmt: "csv" | "json") => void;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const addRef = useRef<HTMLInputElement>(null);
 
   const pickLocal = async () => {
     const anyWin = window as unknown as { showDirectoryPicker?: () => Promise<any> };
@@ -73,17 +78,43 @@ export function TopBar({
         <FolderIcon className="h-4 w-4" /> Open folder
       </button>
       <button
-        onClick={pickLocal}
+        onClick={() => addRef.current?.click()}
         className="inline-flex items-center gap-2 rounded-lg border border-charcoal/50 px-3 py-1.5 text-sm text-ash transition-colors hover:border-ash hover:text-snow"
       >
-        <UploadIcon className="h-4 w-4" /> Local folder
+        <UploadIcon className="h-4 w-4" /> Add images
       </button>
+      <button
+        onClick={pickLocal}
+        className="hidden items-center gap-2 rounded-lg border border-charcoal/50 px-3 py-1.5 text-sm text-ash transition-colors hover:border-ash hover:text-snow sm:inline-flex"
+      >
+        <FolderIcon className="h-4 w-4" /> Local folder
+      </button>
+      {onOpenUploads && (
+        <button
+          onClick={onOpenUploads}
+          title="Your saved uploads"
+          className="hidden items-center gap-2 rounded-lg border border-charcoal/50 px-3 py-1.5 text-sm text-ash transition-colors hover:border-ash hover:text-snow md:inline-flex"
+        >
+          Uploads
+        </button>
+      )}
+      <input
+        ref={addRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          const files = Array.from(e.target.files ?? []);
+          if (files.length) onAddImages(files);
+          e.target.value = "";
+        }}
+      />
       <input
         ref={inputRef}
         type="file"
         // @ts-expect-error non-standard but widely supported folder picker
         webkitdirectory=""
-        directory=""
         multiple
         className="hidden"
         onChange={(e) => {

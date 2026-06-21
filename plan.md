@@ -254,7 +254,7 @@ lazy-rendered and collapsed, so the UI stays fast.
 
 | Your requirement | Approach |
 |---|---|
-| Drag-and-drop an image from anywhere | Always-available drop zone → `POST /api/parse` (in-memory, no disk write) → instant metadata. |
+| Drag-and-drop an image from anywhere | Always-available drop zone. Dropped/"Add images" files are uploaded to `/config/uploads` (persisted across sessions, get real thumbnails) and shown as a server gallery; you can keep adding more. (Local-folder browse still parses in-memory via `POST /api/parse`.) |
 | Select a folder, grid of thumbnails | `GET /api/browse` lists the folder; virtualized grid renders server-generated WebP thumbnails. (Model per decision #1.) |
 | Click image → expand + metadata sidebar | Lightbox with image left, metadata table right; summary fields pinned at top, complex params nested/collapsible. |
 | Important details first (seed, denoise, model…) | `summary` block rendered as a pinned, highlighted table before everything else. |
@@ -307,9 +307,12 @@ labelled as such.
 
 ## 7. Performance & caching (STYLE.md §2 — no bloat)
 
-- **Thumbnails:** generated once on first request, written to `/config/thumbnails`
-  keyed by path+mtime+size, served thereafter. Background-task generation so the
-  grid paints immediately with skeletons.
+- **Thumbnails:** server images → WebP thumbnails generated once on first
+  request, written to `/config/thumbnails` keyed by path+mtime+size, served
+  thereafter. Local-folder images → downscaled **client-side** to a small WebP
+  via `createImageBitmap` + `OffscreenCanvas` (lazy, on-screen cells only,
+  bounded self-revoking cache) so huge folders scroll smoothly instead of
+  decoding full-resolution files per cell.
 - **Metadata LRU:** small in-memory cache (default ~256 entries, env-tunable),
   keyed by path+mtime. Re-parses automatically if a file changes.
 - **Neighbor prefetch:** exactly ±2 around the focused image — not the whole
