@@ -1,0 +1,36 @@
+# --- Project-specific ---
+Prompt.txt
+
+# --- Python / backend ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Node / frontend ---
+node_modules/
+dist/
+.vite/
+*.local
+.eslintcache
+
+# --- Runtime / app data ---
+appdata/
+config/
+logs/
+*.log
+thumbnails/
+.cache/
+
+# --- OS / editor cruft ---
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
