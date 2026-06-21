@@ -147,7 +147,7 @@ order and fall back to "raw EXIF/text dump" so *something* always shows.
 parsers/
   base.py        # NormalizedMetadata model, registry
   a1111.py       # 'parameters' string  -> fields
-  comfyui.py     # 'prompt'/'workflow' JSON graph -> trace key nodes
+  comfyui.py     # generic graph walk (custom-node resilient) -> trace key nodes
   novelai.py     # Comment chunk + stealth-LSB fallback
   invokeai.py
   fooocus.py
@@ -171,17 +171,67 @@ surface first (per your requirement), the rest nest:
   "groups": {                           // collapsible nested sections
     "Generation": {...}, "Model": {...}, "Upscale/Hires": {...}
   },
-  "raw": { "parameters": "...", "workflow": {...} }  // collapsed, copyable
+  "custom_nodes": ["rgthree", "ComfyUI-Impact-Pack"],  // packs detected in graph
+  "unresolved_nodes": ["SomeUnknownNode#42"],          // what we couldn't interpret
+  "raw": { "parameters": "...", "prompt": {...}, "workflow": {...} }  // collapsed, copyable
 }
 ```
 
-For **ComfyUI** we walk the graph: find the `KSampler`(/variants) node and trace
-its inputs back through the graph to resolve seed, steps, cfg, sampler,
-scheduler, denoise, the `CheckpointLoader` model, and `CLIPTextEncode` prompts —
-rather than dumping raw node IDs. Unknown/custom nodes fall into `raw.workflow`.
+### 5.1 ComfyUI: custom nodes & arbitrary workflows (the hard case)
 
-Handles your "large amounts of metadata" requirement: huge workflows are kept in
-`raw` (lazy-rendered, collapsed, with copy-to-clipboard) so the UI stays fast.
+Most real-world ComfyUI images do **not** use only stock nodes — they use custom
+node packs (Impact Pack, rgthree, Efficiency, WAS, Inspire, GGUF/UNET loaders…)
+and the modern decoupled sampling stack (`RandomNoise` + `BasicScheduler` +
+`KSamplerSelect` + `CFGGuider`/`BasicGuider` instead of one `KSampler`). A parser
+that hardcodes "find the `KSampler` node" would fail on the majority of them.
+The design is therefore **type-agnostic and degrades gracefully** — it never
+depends on a fixed list of known node classes:
+
+- **Parse the `prompt` (API) graph, not just `workflow`.** The API format inlines
+  resolved widget values and uses `{class_type, inputs}` where inputs are either
+  literals or `[node_id, slot]` links — far more reliable than positional
+  `widgets_values[]` in the UI graph (which drifts as custom nodes change
+  versions). We keep `workflow` only for raw display.
+- **Find the sink, walk backward generically.** Locate the terminal image node
+  (`SaveImage`/`PreviewImage`/`VAEDecode`/any node feeding output) and traverse
+  upstream following links through **any** node type — known or not — instead of
+  matching specific classes.
+- **Extract fields by widget *name*, not node *type*.** Seeds are `seed`/
+  `noise_seed`, steps `steps`, cfg `cfg`/`guidance`, sampler `sampler_name`,
+  scheduler `scheduler`, denoise `denoise`, etc. A custom sampler we've never
+  seen is still mined correctly if it uses conventional input names. The node
+  closest to the sink wins for the `summary` (so a `FaceDetailer`'s internal
+  sampler doesn't override the main one).
+- **Resolve the decoupled/advanced stack** by aggregating across the upstream
+  cluster: seed from `RandomNoise`, steps/denoise from `BasicScheduler`, sampler
+  from `KSamplerSelect`, cfg + model + conditioning from `CFGGuider`/`BasicGuider`.
+- **Follow reroutes & invisible wiring.** Skip through rgthree `Reroute`/
+  `Get`/`Set` nodes transparently, and do a type-matching second pass for
+  `Anything Everywhere`-style broadcasts (which provide inputs with *no* link in
+  the graph) so model/conditioning still resolve.
+- **Prompts from any source.** Trace conditioning back through encoders
+  (`CLIPTextEncode`, SDXL/Flux/T5 variants, `smZ`, `BNK_*`) and string/primitive/
+  wildcard/`ttN` upstreams; combine `ConditioningCombine`/`Concat` inputs.
+- **Surface what was used and what we couldn't read.** The output lists detected
+  **custom node packs** (inferred from `class_type` names) and a
+  `unresolved_nodes` list, so a partially-understood workflow is transparent
+  rather than silently wrong.
+- **Always keep the full graph.** The complete `prompt` + `workflow` JSON is
+  retained in `raw` and shown in a searchable, collapsible node viewer with
+  copy-to-clipboard — so even a 100-node graph of entirely unknown nodes is fully
+  inspectable and nothing is ever lost.
+
+This is the **graceful-degradation contract**: (1) best case → full resolved
+`summary`; (2) partial → the fields we could mine + an explicit list of what we
+couldn't, plus the node packs involved; (3) worst case → the raw graph viewer.
+The app never errors out or shows blank metadata just because a workflow uses
+nodes we don't recognize.
+
+`comfyui.py` is built around this generic graph walker plus a small, *optional*
+table of "hints" for popular custom samplers/loaders that refine the summary —
+hints only improve results; their absence never breaks parsing. This also handles
+the "large amounts of metadata" requirement: huge graphs stay in `raw`,
+lazy-rendered and collapsed, so the UI stays fast.
 
 ---
 
@@ -199,6 +249,7 @@ Handles your "large amounts of metadata" requirement: huge workflows are kept in
 | Network paths / shared folders | Server-side model reads them as mounted volumes; SMB/NFS paths configurable as scan roots. |
 | Multiple formats (png/jpg/webp…) | Pillow + format-aware parsers cover PNG/JPEG/WebP/AVIF; unknown types still get a raw dump. |
 | Large amounts of metadata | Summary-first + collapsible groups + lazy raw section keeps render cheap. |
+| Custom nodes & arbitrary workflows | Type-agnostic graph walk + widget-name extraction + reroute/broadcast handling; lists detected node packs & unresolved nodes; always keeps the full graph in a searchable raw viewer (see §5.1). Never errors on unknown nodes. |
 
 ---
 
