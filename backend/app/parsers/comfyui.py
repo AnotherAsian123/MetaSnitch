@@ -181,6 +181,19 @@ class ComfyUIParser(Parser):
         )
         custom = [c for c in class_types if c not in _STOCK]
 
+        # Per-instance settings for each custom node (literal widget values only;
+        # link inputs are connections, not settings).
+        custom_details: list[dict] = []
+        for nid, n in nodes.items():
+            if not isinstance(n, dict):
+                continue
+            ct = _class(n)
+            if ct in _STOCK:
+                continue
+            settings = {k: v for k, v in inputs(n).items() if not _is_link(v)}
+            custom_details.append({"id": str(nid), "type": ct, "settings": settings})
+        custom_details.sort(key=lambda d: (d["type"], d["id"]))
+
         groups: dict = {}
         if vae:
             groups.setdefault("Model", {})["vae"] = vae
@@ -199,6 +212,7 @@ class ComfyUIParser(Parser):
             loras=loras,
             groups=groups,
             custom_nodes=custom,
+            custom_node_details=custom_details,
         )
 
     def _prompts(self, nodes, inputs, node, sampler_id, scope):
@@ -275,6 +289,18 @@ class ComfyUIParser(Parser):
         nodes = data.get("nodes", [])
         class_types = sorted({n.get("type", "?") for n in nodes if isinstance(n, dict)})
         custom = [c for c in class_types if c not in _STOCK]
+        custom_details = [
+            {
+                "id": str(n.get("id")),
+                "type": n.get("type", "?"),
+                "settings": {"widgets_values": n.get("widgets_values")}
+                if n.get("widgets_values")
+                else {},
+            }
+            for n in nodes
+            if isinstance(n, dict) and n.get("type", "?") not in _STOCK
+        ]
+        custom_details.sort(key=lambda d: (d["type"], d["id"]))
         prompt = None
         for n in nodes:
             if isinstance(n, dict) and "cliptextencode" in str(n.get("type", "")).lower():
@@ -287,6 +313,7 @@ class ComfyUIParser(Parser):
             summary={},
             prompt=prompt,
             custom_nodes=custom,
+            custom_node_details=custom_details,
             unresolved_nodes=[
                 f"{n.get('type', '?')}#{n.get('id')}" for n in nodes if isinstance(n, dict)
             ][:200],

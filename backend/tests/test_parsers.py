@@ -106,6 +106,10 @@ def test_comfy_custom_decoupled_stack():
     assert md.negative_prompt == "lowres"
     # Custom/unknown node types reported.
     assert "SuperCustomTextEncode" in md.custom_nodes
+    # ...and their settings (literal widget values) are exposed for expansion.
+    detail = next(d for d in md.custom_node_details if d["type"] == "SuperCustomTextEncode")
+    assert detail["settings"].get("text") == "a fox in snow"
+    assert "clip" not in detail["settings"]  # link inputs are connections, not settings
 
 
 def test_unknown_falls_back_to_raw():

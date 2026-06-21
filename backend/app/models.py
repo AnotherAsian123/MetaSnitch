@@ -17,6 +17,8 @@ class NormalizedMetadata(BaseModel):
     groups: dict = Field(default_factory=dict)
     # ComfyUI transparency: which custom packs/nodes appeared, and what we couldn't read.
     custom_nodes: list[str] = Field(default_factory=list)
+    # Per custom-node instance: {"id", "type", "settings": {literal widget values}}.
+    custom_node_details: list[dict] = Field(default_factory=list)
     unresolved_nodes: list[str] = Field(default_factory=list)
     # Full original blobs (collapsed/copyable in the UI; nothing is ever lost).
     raw: dict = Field(default_factory=dict)

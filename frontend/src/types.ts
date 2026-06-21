@@ -6,11 +6,18 @@ export interface Metadata {
   loras: Array<Record<string, unknown>>;
   groups: Record<string, Record<string, unknown>>;
   custom_nodes: string[];
+  custom_node_details: CustomNodeDetail[];
   unresolved_nodes: string[];
   raw: Record<string, unknown>;
   width?: number | null;
   height?: number | null;
   format?: string | null;
+}
+
+export interface CustomNodeDetail {
+  id: string;
+  type: string;
+  settings: Record<string, unknown>;
 }
 
 export interface DirEntry {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api";
 import { copyText, toA1111String } from "../lib/format";
 import { useToast } from "../lib/toast";
-import type { GalleryItem, Metadata } from "../types";
+import type { CustomNodeDetail, GalleryItem, Metadata } from "../types";
 import { CopyIcon, DownloadIcon, StarIcon } from "./icons";
 
 const SUMMARY_ORDER = ["model", "seed", "sampler", "scheduler", "steps", "cfg", "denoise", "size"];
@@ -101,6 +101,35 @@ function KeyValueTable({ data }: { data: Record<string, unknown> }) {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+function CustomNodeRow({ node }: { node: CustomNodeDetail }) {
+  const [open, setOpen] = useState(false);
+  const settingsCount = Object.keys(node.settings ?? {}).length;
+  return (
+    <div className="overflow-hidden rounded-lg border border-charcoal/40 bg-black/20">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
+      >
+        <span className="truncate font-mono text-xs text-snow" title={node.type}>
+          {node.type}
+          <span className="ml-1.5 text-charcoal">#{node.id}</span>
+        </span>
+        <span className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-ash">
+          {settingsCount > 0 ? `${settingsCount} setting${settingsCount === 1 ? "" : "s"}` : "no settings"}
+          {settingsCount > 0 && (
+            <span className={`transition-transform ${open ? "rotate-90" : ""}`}>›</span>
+          )}
+        </span>
+      </button>
+      {open && settingsCount > 0 && (
+        <div className="animate-fade-in px-2 pb-2">
+          <KeyValueTable data={node.settings} />
+        </div>
+      )}
     </div>
   );
 }
@@ -249,20 +278,30 @@ export function MetadataPanel({
           </Section>
         ))}
 
-        {/* ComfyUI transparency */}
-        {md.custom_nodes.length > 0 && (
-          <Section title={`Custom nodes (${md.custom_nodes.length})`}>
-            <div className="flex flex-wrap gap-1.5">
-              {md.custom_nodes.map((n) => (
-                <span
-                  key={n}
-                  className="rounded-md border border-charcoal/40 bg-black/30 px-2 py-1 font-mono text-xs text-ash"
-                >
-                  {n}
-                </span>
+        {/* ComfyUI transparency — each custom node expands to show its settings */}
+        {(md.custom_node_details?.length ?? 0) > 0 ? (
+          <Section title={`Custom nodes (${md.custom_node_details.length})`}>
+            <div className="flex flex-col gap-1.5">
+              {md.custom_node_details.map((node) => (
+                <CustomNodeRow key={`${node.type}#${node.id}`} node={node} />
               ))}
             </div>
           </Section>
+        ) : (
+          md.custom_nodes.length > 0 && (
+            <Section title={`Custom nodes (${md.custom_nodes.length})`}>
+              <div className="flex flex-wrap gap-1.5">
+                {md.custom_nodes.map((n) => (
+                  <span
+                    key={n}
+                    className="rounded-md border border-charcoal/40 bg-black/30 px-2 py-1 font-mono text-xs text-ash"
+                  >
+                    {n}
+                  </span>
+                ))}
+              </div>
+            </Section>
+          )
         )}
 
         {md.unresolved_nodes.length > 0 && (
