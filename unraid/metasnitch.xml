@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>MetaSnitch</Name>
+  <Repository>ghcr.io/anotherasian123/metasnitch:latest</Repository>
+  <Registry>https://github.com/AnotherAsian123/MetaSnitch/pkgs/container/metasnitch</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/AnotherAsian123/MetaSnitch/issues</Support>
+  <Project>https://github.com/AnotherAsian123/MetaSnitch</Project>
+  <Overview>View the generation metadata of AI-generated images (Stable Diffusion, HiDream, ComfyUI, A1111/Forge). Drag-and-drop a single image or browse a mounted folder as a thumbnail gallery; click any image to see seed, model, sampler, CFG, denoise and the full prompt/workflow. Handles ComfyUI custom nodes and arbitrary workflows. Your image shares are mounted READ-ONLY.</Overview>
+  <Category>Tools: MediaApp:Photos</Category>
+  <WebUI>http://[IP]:[PORT:8068]/</WebUI>
+  <TemplateURL/>
+  <Icon>https://raw.githubusercontent.com/AnotherAsian123/MetaSnitch/main/frontend/public/icon-512.png</Icon>
+  <ExtraParams>--user 99:100</ExtraParams>
+  <PostArgs/>
+  <DonateText/>
+  <DonateLink/>
+  <Description>View the generation metadata of AI-generated images. Mount your image library read-only at /data and the appdata volume at /config.</Description>
+  <Networking>
+    <Mode>bridge</Mode>
+    <Publish>
+      <Port>
+        <HostPort>8068</HostPort>
+        <ContainerPort>8000</ContainerPort>
+        <Protocol>tcp</Protocol>
+      </Port>
+    </Publish>
+  </Networking>
+  <Data>
+    <Volume>
+      <HostDir>/mnt/user/appdata/metasnitch</HostDir>
+      <ContainerDir>/config</ContainerDir>
+      <Mode>rw</Mode>
+    </Volume>
+    <Volume>
+      <HostDir>/mnt/user/</HostDir>
+      <ContainerDir>/data</ContainerDir>
+      <Mode>ro</Mode>
+    </Volume>
+  </Data>
+  <Environment>
+    <Variable>
+      <Value>/data</Value>
+      <Name>METASNITCH_SCAN_ROOTS</Name>
+      <Mode/>
+    </Variable>
+    <Variable>
+      <Value>INFO</Value>
+      <Name>METASNITCH_LOG_LEVEL</Name>
+      <Mode/>
+    </Variable>
+  </Environment>
+  <Config Name="WebUI Port" Target="8000" Default="8068" Mode="tcp" Description="Port for the MetaSnitch web interface." Type="Port" Display="always" Required="true" Mask="false">8068</Config>
+  <Config Name="Appdata" Target="/config" Default="/mnt/user/appdata/metasnitch" Mode="rw" Description="Thumbnail cache, logs, settings, uploads and tags." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/metasnitch</Config>
+  <Config Name="Image Library (read-only)" Target="/data" Default="/mnt/user/" Mode="ro" Description="Your AI image shares. Mounted read-only; MetaSnitch never writes here." Type="Path" Display="always" Required="true" Mask="false">/mnt/user/</Config>
+  <Config Name="Scan Roots" Target="METASNITCH_SCAN_ROOTS" Default="/data" Mode="" Description="Comma-separated folders inside the container to browse (e.g. /data)." Type="Variable" Display="advanced" Required="true" Mask="false">/data</Config>
+  <Config Name="Log Level" Target="METASNITCH_LOG_LEVEL" Default="INFO" Mode="" Description="DEBUG, INFO, WARNING or ERROR." Type="Variable" Display="advanced" Required="false" Mask="false">INFO</Config>
+</Container>

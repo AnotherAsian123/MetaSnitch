@@ -1,0 +1,18 @@
+services:
+  metasnitch:
+    build: .
+    image: ghcr.io/anotherasian123/metasnitch:latest
+    container_name: metasnitch
+    ports:
+      - "8068:8000"
+    environment:
+      # Comma-separate multiple roots, e.g. "/data,/data2".
+      - METASNITCH_SCAN_ROOTS=/data
+      - METASNITCH_CONFIG_DIR=/config
+      - METASNITCH_LOG_LEVEL=INFO
+    volumes:
+      # Appdata: thumbnail cache, logs, settings, uploads, tags.
+      - ./appdata:/config
+      # Your AI image library — mounted READ-ONLY. Change the host path.
+      - /path/to/your/ai-images:/data:ro
+    restart: unless-stopped

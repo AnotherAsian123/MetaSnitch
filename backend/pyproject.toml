@@ -1,0 +1,13 @@
+[project]
+name = "metasnitch"
+version = "1.0.0"
+description = "View generation metadata of AI-generated images."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
